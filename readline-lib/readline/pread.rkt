@@ -125,6 +125,9 @@
 (provide readline-prompt)
 (define readline-prompt (make-parameter #f))
 
+;; initialize editline
+(editline-init "Racket REPL")
+
 (define-struct readline-state (prompt-spaces multiline-chunk)
   #:mutable)
 
