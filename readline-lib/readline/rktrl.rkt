@@ -9,13 +9,15 @@
          readline-buffer readline-point
          readline-insert-text
          readline-bind-key
+         readline-add-defun
          readline-startup-hook)
 
 ;; libncurses and/or libtermcap needed on some platforms
 (void (ffi-lib "libcurses" #:fail (lambda () #f)))
 (void (ffi-lib "libtermcap" #:fail (lambda () #f)))
 
-(define libreadline (ffi-lib "libreadline" '("5" "6" "4" "")))
+;(define libreadline (ffi-lib "libreadline" '("5" "6" "4" "")))
+(define libreadline (ffi-lib "libedit" '("2" "")))
 
 (define make-byte-string ; helper for the two types below
   (get-ffi-obj "scheme_make_byte_string" #f (_fun _pointer -> _scheme)))
@@ -37,6 +39,8 @@
       (if x
         (let ([s (bytes->string/utf-8 (make-byte-string x))]) (free x) s)
         eof))))
+
+(define _command_func_t (_fun _int _byte -> _int))
 
 (define readline
   (get-ffi-obj "readline" libreadline (_fun _string -> _string/eof/free)))
@@ -163,8 +167,12 @@
 ;; bind a key to a user-provided operation
 (define readline-bind-key
   (get-ffi-obj #"rl_bind_key" libreadline
-               (_fun _int (_fun _int _byte -> _void)
-                     -> _void)))
+               (_fun _int _command_func_t -> _void)))
+
+;; bind a key and name the given operation
+(define readline-add-defun
+  (get-ffi-obj #"rl_add_defun" libreadline
+               (_fun _string _command_func_t _int -> _void)))
 
 ;; a function to call on startup for readline
 (define readline-startup-hook

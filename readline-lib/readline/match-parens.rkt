@@ -89,6 +89,6 @@
   (when lexer
     (readline-startup-hook
      (lambda ()
-         (readline-bind-key close-paren-code   match-parens)
-         (readline-bind-key close-bracket-code match-parens)
-         (readline-bind-key close-brace-code   match-parens)))))
+       (readline-bind-key close-paren-code   match-parens)
+       (readline-bind-key close-bracket-code match-parens)
+       (readline-bind-key close-brace-code   match-parens)))))

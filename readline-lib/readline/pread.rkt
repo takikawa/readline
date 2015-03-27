@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require "rktrl.rkt" racket/list racket/file)
+(require "libedit.rkt" racket/list racket/file)
 
 ;; --------------------------------------------------------------------------
 ;; Configuration
@@ -41,7 +41,7 @@
     (filter (lambda (bstr) (regexp-match pat bstr))
             (get-namespace-bstrings))))
 
-(set-completion-function! namespace-completion)
+;(set-completion-function! namespace-completion)
 
 ;; --------------------------------------------------------------------------
 ;; History management
@@ -55,9 +55,10 @@
     (set! local-history (take local-history (max-history)))))
 
 (define (load-history)
+  (history-init)
   (set! local-history (get-preference 'readline-input-history (lambda () null)))
   (trim-local-history)
-  (for-each add-history (reverse local-history)))
+  (for-each history-add (reverse local-history)))
 ;; add it now to the actual history
 (load-history)
 
@@ -77,9 +78,9 @@
       (when dup
         (set! local-history (cdr dup))
         (history-delete (car dup))))
-    (add-history-bytes s)
+    (history-add/bytes s)
     (let loop ()
-      (when ((history-length) . > . (max-history)) (history-delete 0) (loop)))
+      (when ((history-get-size) . > . (max-history)) (history-delete 0) (loop)))
     (set! local-history (cons s local-history))
     (trim-local-history)))
 
@@ -101,7 +102,7 @@
   (when (eq? readline-output-port (current-output-port))
     (define-values [line col pos] (port-next-location readline-output-port))
     (when (and col (positive? col)) (newline readline-output-port)))
-  (let ([s (readline-bytes p)]) (add-to-history s force-keep?) s))
+  (let ([s (editline-gets/bytes p)]) (add-to-history s force-keep?) s))
 
 (exit-handler
  (let ([old (exit-handler)])
