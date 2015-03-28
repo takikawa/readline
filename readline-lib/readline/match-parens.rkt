@@ -20,18 +20,17 @@
 ;; argument should be the key passed from readline.
 (define (match-parens char)
   (define-values (_ cur-point) (editline-line))
-  (editline-insert-string (make-string 1 (integer->char char)))
-  (editline-refresh)
-  #;
+  (editline-insert-bytes (bytes char))
+  (low-level-refresh)
   (when (match-paren-timeout)
     (define new-point (find-match cur-point char))
     (when new-point
-      (editline-cursor (- new-point cur-point))
-      (editline-refresh)
+      (editline-cursor (sub1 (- new-point cur-point)))
+      (low-level-refresh-cursor)
       (sleep (/ (match-paren-timeout) 1000))
       ;; move to after the newly inserted character
       (editline-cursor (add1 (- cur-point new-point)))))
-  0)
+  'refresh)
 
 ;; exact-integer? byte? -> (or/c #f exact-integer?)
 ;; Find the index in the readline buffer of the matching paren or

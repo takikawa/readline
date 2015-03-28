@@ -11,12 +11,15 @@
          editline-line
          editline-push
          editline-insert-string
+         editline-insert-bytes
          editline-set-prompt
          editline-set-prompt-esc
          editline-set-editor
          editline-refresh
          editline-bind
          editline-add-function
+         low-level-refresh
+         low-level-refresh-cursor
          history-state
          history-init
          history-add
@@ -99,6 +102,18 @@
            deldata
            replace
            save_fp)))
+
+(define _return-code
+  (_enum '(norm = 0
+           newline
+           eof
+           arghack
+           refresh
+           cursor
+           error
+           fatal
+           redisplay
+           refresh_beep)))
 
 ;; Convert a _LineInfoStruct to values representing the buffer
 ;; and the cursor position in the buffer
@@ -215,8 +230,9 @@
 
 (define-el-set (editline-add-function name help fn) 'addfn
                [_string _string
-                (_cprocedure (list _EditLine _byte) _byte
-                             #:wrapper (λ (p) (λ (el b) (p b))))]
+                (_cprocedure (list _EditLine _byte) _return-code
+                             #:wrapper (λ (p) (λ (el b) (parameterize ([editline-state el])
+                                                          (p b)))))]
                _void)
 
 (define-el editline-source
@@ -239,7 +255,20 @@
 
 (define-el editline-insert-string
            (_fun (_EditLine = (editline-state)) _string -> _int)
-           #:c-id el_line)
+           #:c-id el_insertstr)
+
+(define-el editline-insert-bytes
+           (_fun (_EditLine = (editline-state)) _bytes -> _int)
+           #:c-id el_insertstr)
+
+;; Low-level internal functions
+(define-el low-level-refresh
+           (_fun (_EditLine = (editline-state)) -> _void)
+           #:c-id re_refresh)
+
+(define-el low-level-refresh-cursor
+           (_fun (_EditLine = (editline-state)) -> _void)
+           #:c-id re_refresh_cursor)
 
 ;; Track history in its own parameter
 (define history-state (make-parameter #f))
