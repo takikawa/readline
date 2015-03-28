@@ -12,6 +12,11 @@
 (provide current-prompt max-history keep-duplicates keep-blanks)
 
 ;; --------------------------------------------------------------------------
+;; Initialize Editline
+
+(editline-init "Racket REPL")
+
+;; --------------------------------------------------------------------------
 ;; Simple namespace-based completion
 
 ;; efficiently convert symbols to byte strings
@@ -58,7 +63,7 @@
   (history-init)
   (set! local-history (get-preference 'readline-input-history (lambda () null)))
   (trim-local-history)
-  (for-each history-add (reverse local-history)))
+  (for-each history-enter (reverse local-history)))
 ;; add it now to the actual history
 (load-history)
 
@@ -78,7 +83,7 @@
       (when dup
         (set! local-history (cdr dup))
         (history-delete (car dup))))
-    (history-add/bytes s)
+    (history-enter/bytes s)
     (let loop ()
       (when ((history-get-size) . > . (max-history)) (history-delete 0) (loop)))
     (set! local-history (cons s local-history))
@@ -99,10 +104,11 @@
 (port-count-lines! readline-output-port)
 
 (define (readline-bytes/hist p force-keep?)
+  (editline-set-prompt (λ () p))
   (when (eq? readline-output-port (current-output-port))
     (define-values [line col pos] (port-next-location readline-output-port))
     (when (and col (positive? col)) (newline readline-output-port)))
-  (let ([s (editline-gets/bytes p)]) (add-to-history s force-keep?) s))
+  (let ([s (editline-gets/bytes)]) (add-to-history s force-keep?) s))
 
 (exit-handler
  (let ([old (exit-handler)])
@@ -124,9 +130,6 @@
 ;; chunk as one big multiline string.
 (provide readline-prompt)
 (define readline-prompt (make-parameter #f))
-
-;; initialize editline
-(editline-init "Racket REPL")
 
 (define-struct readline-state (prompt-spaces multiline-chunk)
   #:mutable)

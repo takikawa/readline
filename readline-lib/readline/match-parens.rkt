@@ -3,7 +3,7 @@
 ;; support for bouncing/matching parens, with some inspiration from
 ;; Guile's readline support
 
-(require "rktrl.rkt")
+(require "libedit.rkt")
 
 (provide match-paren-timeout
          install-match-paren-bindings!)
@@ -14,21 +14,24 @@
 ;; timeout in milliseconds
 (define match-paren-timeout (make-parameter 500))
 
-;; int? int? -> void?
+;; int? -> void?
 ;; Matches parentheses in the buffer and flashes the current pair when a
 ;; new closing paren is typed. Ignores the first argument and the second
 ;; argument should be the key passed from readline.
-(define (match-parens _ char)
-  (define cur-point (readline-point))
-  (readline-insert-text (make-string 1 (integer->char char)))
+(define (match-parens char)
+  (define-values (_ cur-point) (editline-line))
+  (editline-insert-string (make-string 1 (integer->char char)))
+  (editline-refresh)
+  #;
   (when (match-paren-timeout)
     (define new-point (find-match cur-point char))
     (when new-point
-      (readline-point new-point)
-      (readline-redisplay #:force? #f)
+      (editline-cursor (- new-point cur-point))
+      (editline-refresh)
       (sleep (/ (match-paren-timeout) 1000))
       ;; move to after the newly inserted character
-      (readline-point (add1 cur-point)))))
+      (editline-cursor (add1 (- cur-point new-point)))))
+  0)
 
 ;; exact-integer? byte? -> (or/c #f exact-integer?)
 ;; Find the index in the readline buffer of the matching paren or
@@ -74,10 +77,8 @@
 ;; Turn the readline buffer contents into an input port from
 ;; the start up to the specified point
 (define (buffer->input-port point)
-  (define buffer-string
-    (list->string
-     (for/list ([char-code (in-bytes (readline-buffer) 0 (add1 point))])
-       (integer->char char-code))))
+  (define-values (buf _) (editline-line))
+  (define buffer-string (list->string (map integer->char buf)))
   (open-input-string buffer-string))
 
 ;; bind a startup hook to install the paren matching in the right keymap
@@ -87,8 +88,5 @@
 
 (define (install-match-paren-bindings!)
   (when lexer
-    (readline-startup-hook
-     (lambda ()
-       (readline-bind-key close-paren-code   match-parens)
-       (readline-bind-key close-bracket-code match-parens)
-       (readline-bind-key close-brace-code   match-parens)))))
+    (editline-add-function "match-paren" "match paren" match-parens)
+    (editline-bind ")" "match-paren")))

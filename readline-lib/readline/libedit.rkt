@@ -9,7 +9,11 @@
          editline-gets/bytes
          editline-cursor
          editline-line
+         editline-push
          editline-insert-string
+         editline-set-prompt
+         editline-set-prompt-esc
+         editline-set-editor
          editline-refresh
          editline-bind
          editline-add-function
@@ -17,7 +21,11 @@
          history-init
          history-add
          history-add/bytes
+         history-append
+         history-enter
+         history-enter/bytes
          history-get-size
+         history-set-size
          history-delete)
 
 (define libedit (ffi-lib "libedit" '("2" "")))
@@ -30,6 +38,10 @@
   ([buffer _pointer]
    [cursor _pointer]
    [lastchar _pointer]))
+
+(define-cstruct _HistEvent
+  ([num _int]
+   [str _string]))
 
 ;; operations for el_set/el_get
 (define _el-op
@@ -98,19 +110,16 @@
              [cursor 0]
              [bytes null])
     (define done? (ptr-equal? buf-ptr lastchar-ptr))
-    (define new-bytes
-      (if done?
-          (reverse bytes)
-          (cons (ptr-ref buf-ptr _byte) bytes)))
     (define new-cursor
       (if (ptr-equal? buf-ptr cursor-ptr)
           cursor
           (add1 cursor)))
-    (if done?
-        (values new-bytes new-cursor)
-        (loop (ptr-add buf-ptr 1 _byte)
-              new-cursor
-              new-bytes))))
+    (cond [done?
+           (values (reverse bytes) new-cursor)]
+          [else
+           (loop (ptr-add buf-ptr 1 _byte)
+                 new-cursor
+                 (cons (ptr-ref buf-ptr _byte) bytes))])))
 
 ;; TODO: what to do about wide char functions?
 
@@ -135,16 +144,20 @@
            #:c-id el_reset)
 
 (define-el editline-gets
-           (_fun (_EditLine = (editline-state)) _int -> _string)
+           (_fun (_EditLine = (editline-state))
+                 (count : (_ptr o _int))
+                 -> _string)
            #:c-id el_gets)
 
 (define-el editline-gets/bytes
-           (_fun (_EditLine = (editline-state)) _int -> _bytes)
+           (_fun (_EditLine = (editline-state))
+                 (count : (_ptr o _int))
+                 -> _bytes)
            #:c-id el_gets)
 
 (define-el editline-getc
            (_fun (_EditLine = (editline-state))
-                 (ch : (_ptr i _byte))
+                 (ch : (_ptr o _byte))
                  -> (code : _int)
                  -> (values code ch))
            #:c-id el_getc)
@@ -155,34 +168,55 @@
 
 ;; TODO: what is the API for el_parse?
 
-(define-syntax-rule (define-el-get (?getter . ?args)
+(define-syntax-rule (define-el-get (?getter ?arg ...)
                       ?enum-sym (?type ...) ?result-type)
-  (define (?getter . ?args)
+  (define (?getter ?arg ...)
     (define c-fun
-      (get-ffi-obj "el_get" (_fun _EditLine _el-op ?type ... -> ?result-type)))
-    (apply c-fun ?enum-sym ?args)))
+      (get-ffi-obj "el_get"
+                   libedit
+                   (_fun (_EditLine = (editline-state))
+                         (_el-op = ?enum-sym)
+                         ?type ... -> ?result-type)))
+    (c-fun ?arg ...)))
 
-(define-syntax-rule (define-el-set (?setter . ?args)
+(define-syntax-rule (define-el-set (?setter ?arg ...)
                       ?enum-sym (?type ...) ?result-type)
-  (define (?setter . ?args)
+  (define (?setter ?arg ...)
     (define c-fun
       (get-ffi-obj "el_set"
                    libedit
-                   (_fun _EditLine _el-op ?type ... -> ?result-type)))
-    (apply c-fun ?enum-sym ?args)))
+                   (_fun (_EditLine = (editline-state))
+                         (_el-op = ?enum-sym)
+                         ?type ... -> ?result-type)))
+    (c-fun ?arg ...)))
 
-(define-el-set (editline-refresh el) 'refresh 
-               ((_EditLine = (editline-state)))
+;; For internal use, since customizing this at the Racket level does not
+;; seem like something that is really desirable
+(define-el-set (el-set-history hist-proc hist)
+               'hist (_pointer _History) _void)
+
+(define-el-set (editline-set-prompt p) 'prompt
+               [(_cprocedure (list _EditLine) _string
+                             #:wrapper (λ (p) (λ (el) (p))))]
                _void)
 
-(define-el-set (editline-bind el key cmd) 'bind
-               ((_EditLine = (editline-state)) _string _string)
+(define-el-set (editline-set-prompt-esc p ch) 'prompt-esc
+               [(_cprocedure (list _EditLine) _string
+                             #:wrapper (λ (p) (λ (el) (p))))
+                _int]
                _void)
 
-(define-el-set (editline-add-function el name help fn) 'addfn
-               ((_EditLine = (editline-state))
-                _string _string
-                (_fun (_EditLine = (editline-state)) _byte ->  _byte))
+(define-el-set (editline-set-editor ed) 'editor (_string) _void)
+
+(define-el-set (editline-refresh) 'refresh () _void)
+
+(define-el-set (editline-bind key cmd) 'bind
+               (_string _string (_pointer = #f)) _void)
+
+(define-el-set (editline-add-function name help fn) 'addfn
+               [_string _string
+                (_cprocedure (list _EditLine _byte) _byte
+                             #:wrapper (λ (p) (λ (el b) (p b))))]
                _void)
 
 (define-el editline-source
@@ -199,7 +233,7 @@
 
 (define-el editline-line
            (_fun (_EditLine = (editline-state))
-                 -> (li : _LineInfoStruct)
+                 -> (li : _LineInfoStruct-pointer)
                  -> (li->values li))
            #:c-id el_line)
 
@@ -214,24 +248,43 @@
            (_fun -> _History)
            #:c-id history_init)
 
-(define (history-init) (history-state (el-history-init)))
+(define (history-init)
+  (define state (el-history-init))
+  (history-state state)
+  ;; set history management to default history function
+  (el-set-history (get-ffi-obj "history" libedit _fpointer) state))
+
+(define-el history-end
+           (_fun (_History = (history-state)) -> _void)
+           #:c-id history_end)
 
 (define-syntax-rule (define-el-history (?history ?arg ...)
-                      ?enum-sym (?type ...) ?result-type)
+                      ?enum-sym (?type ...) ?result-type
+                      ?wrap)
   (define (?history ?arg ...)
     (define c-fun
       (get-ffi-obj "history" libedit
                              (_fun (_History = (history-state))
-                                   _history-op
-                                   (_pointer = #f)
-                                   ?type ... -> ?result-type)))
-    (c-fun ?enum-sym ?arg ...)))
+                                   (he : (_ptr o _HistEvent))
+                                   (_history-op = ?enum-sym)
+                                   ?type ...
+                                   -> (result : ?result-type)
+                                   -> (values he result))))
+    (define-values (he result) (c-fun ?arg ...))
+    (?wrap he result)))
 
-(define-el-history (history-add str) 'add (_string) _void)
+(define-el-history (history-add str) 'add (_string) _void void)
+(define-el-history (history-add/bytes str) 'add (_bytes) _void void)
 
-(define (history-add/bytes bstr)
-  (history-add (bytes->string/utf-8 bstr)))
+(define-el-history (history-append str) 'append (_string) _void void)
 
-(define-el-history (history-delete str) 'delete (_int) _void)
+(define-el-history (history-enter str) 'enter (_string) _void void)
+(define-el-history (history-enter/bytes str) 'enter (_bytes) _void void)
 
-(define-el-history (history-get-size) 'getsize () _int)
+;; FIXME: make sure this doesn't leak memory due to the HistEvent
+(define-el-history (history-delete str) 'del (_int) _void void)
+
+(define-el-history (history-get-size) 'getsize () _int
+                   (λ (he r) (HistEvent-num he)))
+
+(define-el-history (history-set-size size) 'setsize (_int) _void void)
